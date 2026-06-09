@@ -11,8 +11,15 @@ on:
     branches:
       - main
       - master
+  schedule:
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
+      force:
+        description: "Build even if this upstream commit was already built successfully."
+        required: false
+        type: boolean
+        default: false
       tag_name:
         description: "Tag name for the release (leave empty to use version from repository)"
         required: false
@@ -24,19 +31,66 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
+  check_upstream:
+    name: Check upstream update
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.upstream.outputs.sha }}
+      should_build: ${{ steps.decision.outputs.should_build }}
+    steps:
+      - name: Resolve upstream revision
+        id: upstream
+        run: |
+          set -euo pipefail
+          git init --quiet /tmp/upstream-resolve
+          git -C /tmp/upstream-resolve remote add origin "https://github.com/xiph/opus-tools.git"
+          git -C /tmp/upstream-resolve fetch --depth=1 origin HEAD
+          SHA="$(git -C /tmp/upstream-resolve rev-parse 'FETCH_HEAD^{commit}')"
+          if [[ -z "${SHA}" ]]; then
+            echo "Could not resolve upstream revision." >&2
+            exit 1
+          fi
+          echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore build marker
+        id: built_cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .upstream-build-cache
+          key: opus-tools-${{ steps.upstream.outputs.sha }}
+
+      - name: Decide whether to build
+        id: decision
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.force }}" == "true" ]]; then
+            SHOULD_BUILD="true"
+          elif [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "pull_request" ]]; then
+            SHOULD_BUILD="true"
+          elif [[ "${{ steps.built_cache.outputs.cache-hit }}" == "true" ]]; then
+            SHOULD_BUILD="false"
+            echo "Upstream commit ${{ steps.upstream.outputs.sha }} was already built successfully."
+          else
+            SHOULD_BUILD="true"
+          fi
+          echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
+
   build-linux:
     name: Build Linux 64-bit
+    needs: check_upstream
+    if: needs.check_upstream.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: "xiph/opus-tools"
-          ref: ${{ github.event.inputs.opus_tools_ref || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'master' }}
+          ref: ${{ github.event.inputs.opus_tools_ref || needs.check_upstream.outputs.sha }}
           fetch-depth: 0
 
       - name: Install dependencies
@@ -80,7 +134,7 @@ jobs:
       - name: Package Binaries
         run: |
           mkdir -p dist
-          cp src/opusdec src/opusenc src/opusinfo dist/
+          cp opusdec opusenc opusinfo dist/
           tar -czvf opus-tools-linux64.tar.gz -C dist .
 
       - name: Upload Artifact
@@ -92,13 +146,15 @@ jobs:
 
   build-windows:
     name: Build Windows 64-bit
+    needs: check_upstream
+    if: needs.check_upstream.outputs.should_build == 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: "xiph/opus-tools"
-          ref: ${{ github.event.inputs.opus_tools_ref || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'master' }}
+          ref: ${{ github.event.inputs.opus_tools_ref || needs.check_upstream.outputs.sha }}
           fetch-depth: 0
 
       - name: Set up MSYS2
@@ -127,7 +183,7 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dist
-          cp src/opusdec.exe src/opusenc.exe src/opusinfo.exe dist/
+          cp opusdec.exe opusenc.exe opusinfo.exe dist/
           tar -czvf opus-tools-windows64.tar.gz -C dist .
 
       - name: Upload Artifact
@@ -139,9 +195,9 @@ jobs:
 
   release:
     name: Release Binaries
-    needs: [build-linux, build-windows]
+    needs: [check_upstream, build-linux, build-windows]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     steps:
       - name: Create artifacts directory
         run: mkdir -p artifacts
@@ -170,3 +226,12 @@ jobs:
             artifacts/opus-tools-windows64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create build marker
+        run: touch .upstream-build-cache
+
+      - name: Save build marker to cache
+        uses: actions/cache/save@v5
+        with:
+          path: .upstream-build-cache
+          key: opus-tools-${{ needs.check_upstream.outputs.sha }}
