@@ -1,0 +1,172 @@
+name: Build Opus-Tools
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag name for the release (leave empty to use version from repository)"
+        required: false
+        default: ""
+      opus_tools_ref:
+        description: "Branch, tag, or commit of xiph/opus-tools to build"
+        required: true
+        default: "master"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux 64-bit
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: "xiph/opus-tools"
+          ref: ${{ github.event.inputs.opus_tools_ref || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'master' }}
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            build-essential \
+            libflac-dev \
+            libogg-dev \
+            libopus-dev \
+            libopusenc-dev \
+            libopusfile-dev \
+            libtool \
+            pkg-config
+
+      - name: Get version from repository
+        id: get_version
+        run: |
+          ./update_version || true
+          if [ -f package_version ]; then
+            source package_version
+            # Strip v prefix if it exists to normalize it
+            CLEAN_VERSION=$(echo "$PACKAGE_VERSION" | sed 's/^v//')
+            echo "version=v$CLEAN_VERSION" >> $GITHUB_OUTPUT
+            echo "VERSION=v$CLEAN_VERSION" >> $GITHUB_ENV
+          else
+            VERSION=$(git describe --tags --always || echo "unknown")
+            CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
+            echo "version=v$CLEAN_VERSION" >> $GITHUB_OUTPUT
+            echo "VERSION=v$CLEAN_VERSION" >> $GITHUB_ENV
+          fi
+
+      - name: Configure and Build
+        run: |
+          ./autogen.sh
+          ./configure
+          make -j$(nproc)
+
+      - name: Package Binaries
+        run: |
+          mkdir -p dist
+          cp src/opusdec src/opusenc src/opusinfo dist/
+          tar -czvf opus-tools-linux64.tar.gz -C dist .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opus-tools-linux64
+          path: opus-tools-linux64.tar.gz
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows 64-bit
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: "xiph/opus-tools"
+          ref: ${{ github.event.inputs.opus_tools_ref || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'master' }}
+          fetch-depth: 0
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-autotools
+            mingw-w64-x86_64-flac
+            mingw-w64-x86_64-libogg
+            mingw-w64-x86_64-libopusenc
+            mingw-w64-x86_64-opus
+            mingw-w64-x86_64-opusfile
+            mingw-w64-x86_64-toolchain
+
+      - name: Configure and Build Statically
+        shell: msys2 {0}
+        run: |
+          ./autogen.sh
+          ./configure --enable-static --disable-shared LDFLAGS="-static"
+          make -j$(nproc)
+
+      - name: Package Binaries
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist
+          cp src/opusdec.exe src/opusenc.exe src/opusinfo.exe dist/
+          tar -czvf opus-tools-windows64.tar.gz -C dist .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opus-tools-windows64
+          path: opus-tools-windows64.tar.gz
+          retention-days: 7
+
+  release:
+    name: Release Binaries
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: opus-tools-linux64
+          path: artifacts
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: opus-tools-windows64
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || needs.build-linux.outputs.version }}
+          name: Release ${{ github.event.inputs.tag_name || needs.build-linux.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/opus-tools-linux64.tar.gz
+            artifacts/opus-tools-windows64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
