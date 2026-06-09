@@ -218,9 +218,18 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag_name || needs.build-linux.outputs.version }}
-          name: Release ${{ github.event.inputs.tag_name || needs.build-linux.outputs.version }}
+          name: opus-tools ${{ github.event.inputs.tag_name || needs.build-linux.outputs.version }}
           draft: false
           prerelease: false
+          body: |
+            Automated build for xiph/opus-tools.
+
+            Upstream version: ${{ needs.build-linux.outputs.version }}
+            Upstream commit: ${{ needs.check_upstream.outputs.sha }}
+            Build details:
+            - Linux: standard dynamic build
+            - Windows: statically-linked build (LDFLAGS="-static") using MSYS2 / MinGW-w64
+            Platforms: Linux x64, Windows x64
           files: |
             artifacts/opus-tools-linux64.tar.gz
             artifacts/opus-tools-windows64.tar.gz
