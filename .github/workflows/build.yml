@@ -4,15 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
-    tags:
-      - "v*"
-  pull_request:
-    branches:
-      - main
-      - master
-  schedule:
-    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -20,23 +11,25 @@ on:
         required: false
         type: boolean
         default: false
-      tag_name:
-        description: "Tag name for the release (leave empty to use version from repository)"
-        required: false
-        default: ""
-      opus_tools_ref:
-        description: "Branch, tag, or commit of xiph/opus-tools to build"
-        required: true
-        default: "master"
+  schedule:
+    - cron: "0 0 * * *"
 
 permissions:
   contents: write
   actions: write
 
+env:
+  UPSTREAM_REPOSITORY: https://github.com/xiph/opus-tools.git
+  BUILD_ARGS: --enable-static --disable-shared PKG_CONFIG="pkg-config --static"
+
+concurrency:
+  group: opus-tools-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   check_upstream:
     name: Check upstream update
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       sha: ${{ steps.upstream.outputs.sha }}
       cache_hit: ${{ steps.built_cache.outputs.cache-hit }}
@@ -44,16 +37,20 @@ jobs:
     steps:
       - name: Resolve upstream revision
         id: upstream
+        shell: bash
         run: |
           set -euo pipefail
+
           git init --quiet /tmp/upstream-resolve
-          git -C /tmp/upstream-resolve remote add origin "https://github.com/xiph/opus-tools.git"
+          git -C /tmp/upstream-resolve remote add origin "${UPSTREAM_REPOSITORY}"
           git -C /tmp/upstream-resolve fetch --depth=1 origin HEAD
           SHA="$(git -C /tmp/upstream-resolve rev-parse 'FETCH_HEAD^{commit}')"
+
           if [[ -z "${SHA}" ]]; then
             echo "Could not resolve upstream revision." >&2
             exit 1
           fi
+
           echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore build marker
@@ -65,11 +62,13 @@ jobs:
 
       - name: Decide whether to build
         id: decision
+        shell: bash
         run: |
           set -euo pipefail
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.force }}" == "true" ]]; then
             SHOULD_BUILD="true"
-          elif [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "pull_request" ]]; then
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
             SHOULD_BUILD="true"
           elif [[ "${{ steps.built_cache.outputs.cache-hit }}" == "true" ]]; then
             SHOULD_BUILD="false"
@@ -77,6 +76,7 @@ jobs:
           else
             SHOULD_BUILD="true"
           fi
+
           echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
 
   build:
@@ -89,20 +89,22 @@ jobs:
       matrix:
         include:
           - name: Linux x64
-            runner: ubuntu-latest
-            artifact: opus-tools-linux64
+            runner: ubuntu-24.04
+            artifact: opus-tools-linux-x64
           - name: Windows x64
-            runner: windows-latest
-            artifact: opus-tools-windows64
+            runner: windows-2022
+            artifact: opus-tools-windows-x64
     steps:
       - name: Checkout builder repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             autoconf \
             automake \
             autopoint \
@@ -128,6 +130,7 @@ jobs:
 
       - name: Build static dependencies (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: bash scripts/build-deps.sh
 
       - name: Build static dependencies (Windows)
@@ -136,13 +139,20 @@ jobs:
         run: bash scripts/build-deps.sh
 
       - name: Clone upstream
+        shell: bash
         run: |
-          git clone https://github.com/xiph/opus-tools.git source
-          cd source
-          git checkout "${{ github.event.inputs.opus_tools_ref || needs.check_upstream.outputs.sha }}"
+          set -euo pipefail
+
+          git init source
+          git -C source remote add origin "${UPSTREAM_REPOSITORY}"
+          git -C source fetch --depth 1 origin HEAD
+          git -C source checkout --detach FETCH_HEAD
+
+          test "$(git -C source rev-parse HEAD)" = "${{ needs.check_upstream.outputs.sha }}"
 
       - name: Build binary (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: bash scripts/build-app.sh
 
       - name: Build binary (Windows)
@@ -152,6 +162,7 @@ jobs:
 
       - name: Package artifact (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: bash scripts/package.sh
 
       - name: Package artifact (Windows)
@@ -163,18 +174,33 @@ jobs:
         id: package_meta
         shell: bash
         run: |
-          upstream_version="$(cat package/version.txt | head -n1)"
-          safe_version="$(echo "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
-          echo "upstream_version=${upstream_version}" >> $GITHUB_OUTPUT
-          echo "safe_version=${safe_version}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          upstream_version="$(sed 's/\r$//' package/version.txt | grep -Eo 'v?[0-9]+([.][0-9]+)+([-+][A-Za-z0-9._-]+)?' | head -n1 || true)"
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="$(sed 's/\r$//' package/version.txt | sed '/^[[:space:]]*$/d' | head -n1)"
+          fi
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="unknown-version"
+          fi
+
+          safe_version="$(printf '%s' "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "${safe_version}" ]]; then
+            safe_version="unknown-version"
+          fi
+
+          {
+            echo "upstream_version=${upstream_version}"
+            echo "safe_version=${safe_version}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}-${{ steps.package_meta.outputs.safe_version }}
           path: package/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
   release:
     name: Publish GitHub release
@@ -182,7 +208,7 @@ jobs:
       - check_upstream
       - build
     if: needs.check_upstream.outputs.should_build == 'true' && success()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -191,8 +217,10 @@ jobs:
 
       - name: Prepare release assets
         id: release_meta
+        shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p release-assets
           for artifact_dir in release-input/*; do
             artifact_name="$(basename "${artifact_dir}")"
@@ -200,40 +228,49 @@ jobs:
           done
 
           version_file="$(find release-input -name version.txt -print -quit)"
-          upstream_version="$(cat "${version_file}" | head -n1)"
-          safe_version="$(echo "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
-
-          # Custom release title (optional user tag input override)
-          USER_TAG="${{ github.event.inputs.tag_name }}"
-          if [[ -n "${USER_TAG}" ]]; then
-            RELEASE_TAG="${USER_TAG}"
-            RELEASE_TITLE="opus-tools ${USER_TAG}"
-          else
-            RELEASE_TAG="opus-tools-${safe_version}"
-            RELEASE_TITLE="opus-tools ${upstream_version}"
+          upstream_version="$(sed 's/\r$//' "${version_file}" | grep -Eo 'v?[0-9]+([.][0-9]+)+([-+][A-Za-z0-9._-]+)?' | head -n1 || true)"
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="$(sed 's/\r$//' "${version_file}" | sed '/^[[:space:]]*$/d' | head -n1)"
+          fi
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="unknown-version"
           fi
 
-          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
-          echo "release_title=${RELEASE_TITLE}" >> $GITHUB_OUTPUT
-          echo "upstream_version=${upstream_version}" >> $GITHUB_OUTPUT
+          safe_version="$(printf '%s' "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "${safe_version}" ]]; then
+            safe_version="unknown-version"
+          fi
 
-          cat > release-notes.md <<EOF
-          Automated build for xiph/opus-tools.
+          release_title="opus-tools ${upstream_version}"
 
-          Upstream version: ${upstream_version}
-          Upstream commit: ${{ needs.check_upstream.outputs.sha }}
-          Build arguments: \`--enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-all-static" (Linux) / LDFLAGS="-static" (Windows)\`
-          Platforms: Linux x64, Windows x64
-          EOF
+          {
+            echo "upstream_version<<EOF"
+            echo "${upstream_version}"
+            echo "EOF"
+            echo "safe_version=${safe_version}"
+            echo "release_title<<EOF"
+            echo "${release_title}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          printf "%s\n" \
+            "Automated build for xiph/opus-tools." \
+            "" \
+            "Upstream version: ${upstream_version}" \
+            "Upstream commit: ${{ needs.check_upstream.outputs.sha }}" \
+            "Build arguments: \`${BUILD_ARGS} LDFLAGS=\"-all-static\" (Linux) / LDFLAGS=\"-static\" (Windows)\`" \
+            "Platforms: Linux x64, Windows x64" > release-notes.md
 
       - name: Create or update release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ steps.release_meta.outputs.release_tag }}
+          RELEASE_TAG: opus-tools-${{ steps.release_meta.outputs.safe_version }}
           RELEASE_TITLE: ${{ steps.release_meta.outputs.release_title }}
         run: |
           set -euo pipefail
+
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" release-assets/* --clobber
             gh release edit "${RELEASE_TAG}" --title "${RELEASE_TITLE}" --notes-file release-notes.md
@@ -251,9 +288,10 @@ jobs:
       - build
       - release
     if: needs.check_upstream.outputs.should_build == 'true' && needs.check_upstream.outputs.cache_hit != 'true' && success()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Create build marker
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p .upstream-build-cache
