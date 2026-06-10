@@ -125,11 +125,16 @@ jobs:
             echo "VERSION=v$CLEAN_VERSION" >> $GITHUB_ENV
           fi
 
-      - name: Configure and Build
+      - name: Configure and Build Statically
         run: |
           ./autogen.sh
-          ./configure
+          ./configure PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
           make -j$(nproc)
+
+      - name: Verify static linking
+        run: |
+          file opusenc
+          ldd opusenc 2>&1 | grep -q "not a dynamic executable" && echo "Verified: Binary is fully static." || (echo "Error: Binary is not statically linked!" && ldd opusenc && exit 1)
 
       - name: Package Binaries
         run: |
