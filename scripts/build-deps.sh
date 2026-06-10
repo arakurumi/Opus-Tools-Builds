@@ -18,10 +18,9 @@ cd build-temp
 
 # 1. Build libogg
 echo "===================================================="
-# Using libogg tag/branch if needed, default to main/master
-echo "Cloning libogg from github.com/xiph/ogg..."
+echo "Cloning libogg (${LIBOGG_REF}) from ${LIBOGG_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 https://github.com/xiph/ogg.git libogg
+git clone --depth 1 --branch "${LIBOGG_REF}" "${LIBOGG_REPOSITORY}" libogg
 cd libogg
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared
@@ -31,9 +30,9 @@ cd ..
 
 # 2. Build libopus
 echo "===================================================="
-echo "Cloning libopus from github.com/xiph/opus..."
+echo "Cloning libopus (${LIBOPUS_REF}) from ${LIBOPUS_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 https://github.com/xiph/opus.git libopus
+git clone --depth 1 --branch "${LIBOPUS_REF}" "${LIBOPUS_REPOSITORY}" libopus
 cd libopus
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared
@@ -45,9 +44,9 @@ export PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig"
 
 # 3. Build libflac
 echo "===================================================="
-echo "Cloning libflac from github.com/xiph/flac..."
+echo "Cloning libflac (${LIBFLAC_REF}) from ${LIBFLAC_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 https://github.com/xiph/flac.git libflac
+git clone --depth 1 --branch "${LIBFLAC_REF}" "${LIBFLAC_REPOSITORY}" libflac
 cd libflac
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared --disable-oggtest --disable-cpplibs
@@ -57,9 +56,9 @@ cd ..
 
 # 4. Build libopusenc
 echo "===================================================="
-echo "Cloning libopusenc from github.com/xiph/libopusenc..."
+echo "Cloning libopusenc (${LIBOPUSENC_REF}) from ${LIBOPUSENC_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 https://github.com/xiph/libopusenc.git libopusenc
+git clone --depth 1 --branch "${LIBOPUSENC_REF}" "${LIBOPUSENC_REPOSITORY}" libopusenc
 cd libopusenc
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared
@@ -69,9 +68,9 @@ cd ..
 
 # 5. Build libopusfile
 echo "===================================================="
-echo "Cloning libopusfile from github.com/xiph/opusfile..."
+echo "Cloning libopusfile (${LIBOPUSFILE_REF}) from ${LIBOPUSFILE_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 https://github.com/xiph/opusfile.git libopusfile
+git clone --depth 1 --branch "${LIBOPUSFILE_REF}" "${LIBOPUSFILE_REPOSITORY}" libopusfile
 cd libopusfile
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared --disable-http
