@@ -18,11 +18,12 @@ cd source
 
 if [[ "$(uname -s)" == *"NT"* || "$(uname -s)" == *"MINGW"* || "$(uname -s)" == *"MSYS"* ]]; then
   echo "Building opus-tools for Windows (MSYS2)..."
-  ./configure --prefix="${workspace}/dist" --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
+  ./configure --prefix="${workspace}/dist" --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static" CFLAGS="-DFLAC__NO_DLL"
 else
   echo "Building opus-tools for Linux..."
-  ./configure --prefix="${workspace}/dist" --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-all-static"
+  ./configure --prefix="${workspace}/dist" --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
 fi
+
 
 make -j"$(nproc)"
 make install
