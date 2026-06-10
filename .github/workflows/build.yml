@@ -179,7 +179,6 @@ jobs:
           ./configure --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
           make -j$(nproc)
 
-
       - name: Package Binaries
         shell: msys2 {0}
         run: |
@@ -227,9 +226,7 @@ jobs:
 
             Upstream version: ${{ needs.build-linux.outputs.version }}
             Upstream commit: ${{ needs.check_upstream.outputs.sha }}
-            Build details:
-            - Linux: standard dynamic build
-            - Windows: statically-linked build (LDFLAGS="-static") using MSYS2 / MinGW-w64
+            Build arguments: `--enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"`
             Platforms: Linux x64, Windows x64
           files: |
             artifacts/opus-tools-linux64.tar.gz
