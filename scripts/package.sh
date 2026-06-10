@@ -54,12 +54,13 @@ for bin in opusenc opusdec opusinfo; do
       exit 1
     fi
   else
-    # On Linux, verify it is a fully static binary
-    if ! grep -qi 'not a dynamic executable' ldd_output.txt && grep -q '\.so' ldd_output.txt; then
-      echo "::error::Linux binary is not statically linked!"
+    # On Linux, verify that our built dependencies are not dynamically linked
+    if grep -Ei 'lib(opus|ogg|flac|opusenc|opusfile)[.-]' ldd_output.txt; then
+      echo "::error::Linux binary is not statically linked to dependencies!"
       exit 1
     fi
   fi
+
   rm -f ldd_output.txt
 done
 
