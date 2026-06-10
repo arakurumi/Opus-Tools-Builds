@@ -155,10 +155,8 @@ jobs:
 
           git init source
           git -C source remote add origin "${UPSTREAM_REPOSITORY}"
-          git -C source fetch --depth 1 origin HEAD
-          git -C source checkout --detach FETCH_HEAD
-
-          test "$(git -C source rev-parse HEAD)" = "${{ needs.check_upstream.outputs.sha }}"
+          git -C source fetch origin --tags
+          git -C source checkout --detach "${{ needs.check_upstream.outputs.sha }}"
 
       - name: Build binary (Linux)
         if: runner.os == 'Linux'
@@ -186,13 +184,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          upstream_version="$(sed 's/\r$//' package/version.txt | grep -Eo 'v?[0-9]+([.][0-9]+)+([-+][A-Za-z0-9._-]+)?' | head -n1 || true)"
-          if [[ -z "${upstream_version}" ]]; then
-            upstream_version="$(sed 's/\r$//' package/version.txt | sed '/^[[:space:]]*$/d' | head -n1)"
+          raw_version="$(cat package/version.txt | sed 's/\r$//')"
+          # Strip the git hash suffix (-g1234567) if present
+          cleaned_version="$(echo "${raw_version}" | sed -E 's/-g[0-9a-f]+$//')"
+          # Make sure it starts with 'v'
+          if [[ ! "${cleaned_version}" =~ ^v ]]; then
+            cleaned_version="v${cleaned_version}"
           fi
-          if [[ -z "${upstream_version}" ]]; then
-            upstream_version="unknown-version"
-          fi
+          upstream_version="${cleaned_version}"
 
           safe_version="$(printf '%s' "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
           if [[ -z "${safe_version}" ]]; then
@@ -238,20 +237,21 @@ jobs:
           done
 
           version_file="$(find release-input -name version.txt -print -quit)"
-          upstream_version="$(sed 's/\r$//' "${version_file}" | grep -Eo 'v?[0-9]+([.][0-9]+)+([-+][A-Za-z0-9._-]+)?' | head -n1 || true)"
-          if [[ -z "${upstream_version}" ]]; then
-            upstream_version="$(sed 's/\r$//' "${version_file}" | sed '/^[[:space:]]*$/d' | head -n1)"
+          raw_version="$(cat "${version_file}" | sed 's/\r$//')"
+          # Strip the git hash suffix (-g1234567) if present
+          cleaned_version="$(echo "${raw_version}" | sed -E 's/-g[0-9a-f]+$//')"
+          # Make sure it starts with 'v'
+          if [[ ! "${cleaned_version}" =~ ^v ]]; then
+            cleaned_version="v${cleaned_version}"
           fi
-          if [[ -z "${upstream_version}" ]]; then
-            upstream_version="unknown-version"
-          fi
+          upstream_version="${cleaned_version}"
 
           safe_version="$(printf '%s' "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
           if [[ -z "${safe_version}" ]]; then
             safe_version="unknown-version"
           fi
 
-          release_title="opus-tools ${upstream_version}"
+          release_title="Opus-Tools ${upstream_version}"
 
           {
             echo "upstream_version<<EOF"
@@ -262,6 +262,7 @@ jobs:
             echo "${release_title}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
+
 
           printf "%s\n" \
             "Automated build for xiph/opus-tools." \
