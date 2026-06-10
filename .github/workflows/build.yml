@@ -39,6 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.upstream.outputs.sha }}
+      cache_hit: ${{ steps.built_cache.outputs.cache-hit }}
       should_build: ${{ steps.decision.outputs.should_build }}
     steps:
       - name: Resolve upstream revision
@@ -78,166 +79,185 @@ jobs:
           fi
           echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
 
-  build-linux:
-    name: Build Linux 64-bit
+  build:
+    name: Build ${{ matrix.name }}
     needs: check_upstream
     if: needs.check_upstream.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-latest
+            artifact: opus-tools-linux64
+          - name: Windows x64
+            runner: windows-latest
+            artifact: opus-tools-windows64
     steps:
-      - name: Checkout repository
+      - name: Checkout builder repository
         uses: actions/checkout@v6
-        with:
-          repository: "xiph/opus-tools"
-          ref: ${{ github.event.inputs.opus_tools_ref || needs.check_upstream.outputs.sha }}
-          fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             autoconf \
             automake \
             build-essential \
-            libflac-dev \
-            libogg-dev \
-            libopus-dev \
-            libopusenc-dev \
-            libopusfile-dev \
             libtool \
-            pkg-config
-
-      - name: Get version from repository
-        id: get_version
-        run: |
-          ./update_version || true
-          if [ -f package_version ]; then
-            source package_version
-            # Strip v prefix if it exists to normalize it
-            CLEAN_VERSION=$(echo "$PACKAGE_VERSION" | sed 's/^v//')
-            echo "version=v$CLEAN_VERSION" >> $GITHUB_OUTPUT
-            echo "VERSION=v$CLEAN_VERSION" >> $GITHUB_ENV
-          else
-            VERSION=$(git describe --tags --always || echo "unknown")
-            CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
-            echo "version=v$CLEAN_VERSION" >> $GITHUB_OUTPUT
-            echo "VERSION=v$CLEAN_VERSION" >> $GITHUB_ENV
-          fi
-
-      - name: Configure and Build Statically
-        run: |
-          ./autogen.sh
-          ./configure --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
-          make -j$(nproc)
-
-      - name: Package Binaries
-        run: |
-          mkdir -p dist
-          cp opusdec opusenc opusinfo dist/
-          tar -czvf opus-tools-linux64.tar.gz -C dist .
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: opus-tools-linux64
-          path: opus-tools-linux64.tar.gz
-          retention-days: 7
-
-  build-windows:
-    name: Build Windows 64-bit
-    needs: check_upstream
-    if: needs.check_upstream.outputs.should_build == 'true'
-    runs-on: windows-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          repository: "xiph/opus-tools"
-          ref: ${{ github.event.inputs.opus_tools_ref || needs.check_upstream.outputs.sha }}
-          fetch-depth: 0
+            pkg-config \
+            gettext \
+            autopoint
 
       - name: Set up MSYS2
+        if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
           update: true
           install: >-
             base-devel
+            git
             mingw-w64-x86_64-autotools
-            mingw-w64-x86_64-flac
-            mingw-w64-x86_64-libogg
-            mingw-w64-x86_64-libopusenc
-            mingw-w64-x86_64-opus
-            mingw-w64-x86_64-opusfile
             mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-pkgconf
 
-      - name: Configure and Build Statically
+      - name: Build static dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: bash scripts/build-deps.sh
+
+      - name: Build static dependencies (Windows)
+        if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: |
-          ./autogen.sh
-          ./configure --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
-          make -j$(nproc)
+        run: bash scripts/build-deps.sh
 
-      - name: Package Binaries
+      - name: Clone upstream
+        run: |
+          git clone https://github.com/xiph/opus-tools.git source
+          cd source
+          git checkout "${{ github.event.inputs.opus_tools_ref || needs.check_upstream.outputs.sha }}"
+
+      - name: Build binary (Linux)
+        if: runner.os == 'Linux'
+        run: bash scripts/build-app.sh
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: |
-          mkdir -p dist
-          cp opusdec.exe opusenc.exe opusinfo.exe dist/
-          tar -czvf opus-tools-windows64.tar.gz -C dist .
+        run: bash scripts/build-app.sh
 
-      - name: Upload Artifact
+      - name: Package artifact (Linux)
+        if: runner.os == 'Linux'
+        run: bash scripts/package.sh
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/package.sh
+
+      - name: Read package version
+        id: package_meta
+        shell: bash
+        run: |
+          upstream_version="$(cat package/version.txt | head -n1)"
+          safe_version="$(echo "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
+          echo "upstream_version=${upstream_version}" >> $GITHUB_OUTPUT
+          echo "safe_version=${safe_version}" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: opus-tools-windows64
-          path: opus-tools-windows64.tar.gz
+          name: ${{ matrix.artifact }}-${{ steps.package_meta.outputs.safe_version }}
+          path: package/
+          if-no-files-found: error
           retention-days: 7
 
   release:
-    name: Release Binaries
-    needs: [check_upstream, build-linux, build-windows]
+    name: Publish GitHub release
+    needs:
+      - check_upstream
+      - build
+    if: needs.check_upstream.outputs.should_build == 'true' && success()
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     steps:
-      - name: Create artifacts directory
-        run: mkdir -p artifacts
-
-      - name: Download Linux Artifact
+      - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
-          name: opus-tools-linux64
-          path: artifacts
+          path: release-input
 
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: opus-tools-windows64
-          path: artifacts
+      - name: Prepare release assets
+        id: release_meta
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for artifact_dir in release-input/*; do
+            artifact_name="$(basename "${artifact_dir}")"
+            tar -czf "release-assets/${artifact_name}.tar.gz" -C "${artifact_dir}" .
+          done
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: opus-tools-${{ github.event.inputs.tag_name || needs.build-linux.outputs.version }}
-          name: opus-tools ${{ github.event.inputs.tag_name || needs.build-linux.outputs.version }}
-          draft: false
-          prerelease: false
-          body: |
-            Automated build for xiph/opus-tools.
+          version_file="$(find release-input -name version.txt -print -quit)"
+          upstream_version="$(cat "${version_file}" | head -n1)"
+          safe_version="$(echo "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
+          
+          # Custom release title (optional user tag input override)
+          USER_TAG="${{ github.event.inputs.tag_name }}"
+          if [[ -n "${USER_TAG}" ]]; then
+            RELEASE_TAG="${USER_TAG}"
+            RELEASE_TITLE="opus-tools ${USER_TAG}"
+          else
+            RELEASE_TAG="opus-tools-${safe_version}"
+            RELEASE_TITLE="opus-tools ${upstream_version}"
+          fi
 
-            Upstream version: ${{ needs.build-linux.outputs.version }}
-            Upstream commit: ${{ needs.check_upstream.outputs.sha }}
-            Build arguments: `--enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"`
-            Platforms: Linux x64, Windows x64
-          files: |
-            artifacts/opus-tools-linux64.tar.gz
-            artifacts/opus-tools-windows64.tar.gz
+          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+          echo "release_title=${RELEASE_TITLE}" >> $GITHUB_OUTPUT
+          echo "upstream_version=${upstream_version}" >> $GITHUB_OUTPUT
+
+          cat > release-notes.md <<EOF
+          Automated build for xiph/opus-tools.
+
+          Upstream version: ${upstream_version}
+          Upstream commit: ${{ needs.check_upstream.outputs.sha }}
+          Build arguments: \`--enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-all-static" (Linux) / LDFLAGS="-static" (Windows)\`
+          Platforms: Linux x64, Windows x64
+          EOF
+
+      - name: Create or update release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.release_tag }}
+          RELEASE_TITLE: ${{ steps.release_meta.outputs.release_title }}
+        run: |
+          set -euo pipefail
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release-assets/* --clobber
+            gh release edit "${RELEASE_TAG}" --title "${RELEASE_TITLE}" --notes-file release-notes.md
+          else
+            gh release create "${RELEASE_TAG}" release-assets/* \
+              --title "${RELEASE_TITLE}" \
+              --notes-file release-notes.md \
+              --target "${GITHUB_SHA}"
+          fi
 
+  mark_built:
+    name: Mark upstream commit as built
+    needs:
+      - check_upstream
+      - build
+      - release
+    if: needs.check_upstream.outputs.should_build == 'true' && needs.check_upstream.outputs.cache_hit != 'true' && success()
+    runs-on: ubuntu-latest
+    steps:
       - name: Create build marker
-        run: touch .upstream-build-cache
+        run: |
+          set -euo pipefail
+          mkdir -p .upstream-build-cache
+          echo "${{ needs.check_upstream.outputs.sha }}" > .upstream-build-cache/upstream-sha.txt
 
-      - name: Save build marker to cache
+      - name: Save build marker
         uses: actions/cache/save@v5
         with:
           path: .upstream-build-cache
