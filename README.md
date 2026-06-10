@@ -4,8 +4,8 @@ This repository builds [xiph/opus-tools](https://github.com/xiph/opus-tools) sta
 
 ## What It Builds
 
-- Linux x64 on `ubuntu-latest`
-- Windows x64 on `windows-latest` through MSYS2 `MINGW64`
+- Linux x64 on `ubuntu-24.04`
+- Windows x64 on `windows-2022` through MSYS2 `MINGW64`
 - Build arguments: `./configure --prefix="${workspace}/dist" --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static" CFLAGS="-DFLAC__NO_DLL"` (Linux) & `./configure --prefix="${workspace}/dist" --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"` (Windows)
 
 The workflow uploads GitHub Actions artifacts named:
