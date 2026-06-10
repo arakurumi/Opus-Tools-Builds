@@ -18,10 +18,11 @@ cd build-temp
 
 # 1. Build libogg
 echo "===================================================="
-echo "Cloning libogg (${LIBOGG_REF}) from ${LIBOGG_REPOSITORY}..."
+echo "Cloning libogg from ${LIBOGG_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 --branch "${LIBOGG_REF}" "${LIBOGG_REPOSITORY}" libogg
+git clone "${LIBOGG_REPOSITORY}" libogg
 cd libogg
+git checkout "${LIBOGG_REF}"
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared
 make -j"$(nproc)"
@@ -30,10 +31,11 @@ cd ..
 
 # 2. Build libopus
 echo "===================================================="
-echo "Cloning libopus (${LIBOPUS_REF}) from ${LIBOPUS_REPOSITORY}..."
+echo "Cloning libopus from ${LIBOPUS_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 --branch "${LIBOPUS_REF}" "${LIBOPUS_REPOSITORY}" libopus
+git clone "${LIBOPUS_REPOSITORY}" libopus
 cd libopus
+git checkout "${LIBOPUS_REF}"
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared
 make -j"$(nproc)"
@@ -44,10 +46,11 @@ export PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig"
 
 # 3. Build libflac
 echo "===================================================="
-echo "Cloning libflac (${LIBFLAC_REF}) from ${LIBFLAC_REPOSITORY}..."
+echo "Cloning libflac from ${LIBFLAC_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 --branch "${LIBFLAC_REF}" "${LIBFLAC_REPOSITORY}" libflac
+git clone "${LIBFLAC_REPOSITORY}" libflac
 cd libflac
+git checkout "${LIBFLAC_REF}"
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared --disable-oggtest --disable-cpplibs
 make -j"$(nproc)"
@@ -56,10 +59,11 @@ cd ..
 
 # 4. Build libopusenc
 echo "===================================================="
-echo "Cloning libopusenc (${LIBOPUSENC_REF}) from ${LIBOPUSENC_REPOSITORY}..."
+echo "Cloning libopusenc from ${LIBOPUSENC_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 --branch "${LIBOPUSENC_REF}" "${LIBOPUSENC_REPOSITORY}" libopusenc
+git clone "${LIBOPUSENC_REPOSITORY}" libopusenc
 cd libopusenc
+git checkout "${LIBOPUSENC_REF}"
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared
 make -j"$(nproc)"
@@ -68,10 +72,11 @@ cd ..
 
 # 5. Build libopusfile
 echo "===================================================="
-echo "Cloning libopusfile (${LIBOPUSFILE_REF}) from ${LIBOPUSFILE_REPOSITORY}..."
+echo "Cloning libopusfile from ${LIBOPUSFILE_REPOSITORY}..."
 echo "===================================================="
-git clone --depth 1 --branch "${LIBOPUSFILE_REF}" "${LIBOPUSFILE_REPOSITORY}" libopusfile
+git clone "${LIBOPUSFILE_REPOSITORY}" libopusfile
 cd libopusfile
+git checkout "${LIBOPUSFILE_REF}"
 ./autogen.sh
 ./configure --prefix="${DEPS_PREFIX}" --enable-static --disable-shared --disable-http
 make -j"$(nproc)"
