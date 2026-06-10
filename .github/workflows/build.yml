@@ -128,7 +128,7 @@ jobs:
       - name: Configure and Build Statically
         run: |
           ./autogen.sh
-          ./configure PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
+          ./configure --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
           make -j$(nproc)
 
       - name: Package Binaries
@@ -176,8 +176,9 @@ jobs:
         shell: msys2 {0}
         run: |
           ./autogen.sh
-          ./configure --enable-static --disable-shared LDFLAGS="-static"
+          ./configure --enable-static --disable-shared PKG_CONFIG="pkg-config --static" LDFLAGS="-static"
           make -j$(nproc)
+
 
       - name: Package Binaries
         shell: msys2 {0}
