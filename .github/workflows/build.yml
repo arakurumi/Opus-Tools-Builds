@@ -105,11 +105,11 @@ jobs:
           sudo apt-get install -y \
             autoconf \
             automake \
+            autopoint \
             build-essential \
-            libtool \
-            pkg-config \
             gettext \
-            autopoint
+            libtool \
+            pkg-config
 
       - name: Set up MSYS2
         if: runner.os == 'Windows'
@@ -121,10 +121,9 @@ jobs:
             base-devel
             git
             mingw-w64-x86_64-autotools
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-libtool
-
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-toolchain
 
       - name: Build static dependencies (Linux)
         if: runner.os == 'Linux'
@@ -202,7 +201,7 @@ jobs:
           version_file="$(find release-input -name version.txt -print -quit)"
           upstream_version="$(cat "${version_file}" | head -n1)"
           safe_version="$(echo "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
-          
+
           # Custom release title (optional user tag input override)
           USER_TAG="${{ github.event.inputs.tag_name }}"
           if [[ -n "${USER_TAG}" ]]; then
